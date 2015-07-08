@@ -13,11 +13,61 @@ from zope.dottedname.resolve import resolve
 Row = namedtuple('Row', ['index', 'operator', 'values'])
 
 
-def parseFormquery(context, formquery, sort_on=None, sort_order=None):
+def update_with_parent_query(context, formquery, fieldname, in_factory, acquire):
+    # Possibly update the formquery with criteria inherited from the
+    # parent of the context.
+    if not acquire:
+        return
+    if not fieldname:
+        return
+    try:
+        field = context.getField(fieldname)
+    except AttributeError:
+        # When a Collection is being created in the
+        # portal_factory, the context may be the Plone Site, which
+        # has no getField method.
+        return
+    if field is None:
+        return
+    if in_factory:
+        parent = context
+    else:
+        parent = aq_parent(context)
+    # The following will return an empty list if the parent
+    # does not have this same field.
+    values = field.getRaw(parent)
+    if not values:
+        return
+    # Check that the values are what we expect, as it may be for
+    # example a BooleanField with the same name.
+    if not isinstance(values, list) and not isinstance(values, tuple):
+        return
+    for row in values:
+        # A row must have keys i and o.  v is optional.  We do not
+        # expect a dictionary, but an instance.
+        try:
+            row.get('i')
+            row.get('o')
+        except AttributeError:
+            return
+    # Now add the values, if our own formquery does not already have
+    # the same key.
+    formquery_keys = [x.get('i') for x in formquery]
+    for row in values:
+        if row.get('i') not in formquery_keys:
+            formquery.append(row)
+
+
+def parseFormquery(context, formquery, sort_on=None, sort_order=None,
+                   fieldname='', in_factory='', acquire=''):
 
     if not formquery:
         return {}
     reg = getUtility(IRegistry)
+
+    # Possibly update the formquery with criteria inherited from the
+    # parent of the context.
+    update_with_parent_query(context, formquery, fieldname, in_factory, acquire)
 
     # Make sure the things in formquery are dictionaries
     formquery = map(dict, formquery)
